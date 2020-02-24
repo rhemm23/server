@@ -237,6 +237,7 @@ server_t *start_server(config_t *config) {
   if(pthread_create(&server->listener_thread, NULL, server_loop, (void*)server) != 0) {
     die("pthread_create");
   }
+  return server;
 }
 
 void stop_server(server_t *server) {
