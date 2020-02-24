@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 #include <string.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -30,6 +31,7 @@ static void disconnect_peer(worker_t *worker, int peer_fd) {
   if(epoll_ctl(worker->epoll_fd, EPOLL_CTL_DEL, peer_fd, NULL) < 0) {
     die("epoll_ctl");
   }
+  close(peer_fd);
 }
 
 /**
@@ -203,9 +205,6 @@ static void *server_loop(void *state) {
   }
 }
 
-/**
- * Creates and starts a new server
- */
 server_t *start_server(config_t *config) {
   server_t *server = (server_t*)scalloc(1, sizeof(server_t));
   server->socket_fd = create_socket(config->port, config->backlog);
@@ -238,4 +237,34 @@ server_t *start_server(config_t *config) {
   if(pthread_create(&server->listener_thread, NULL, server_loop, (void*)server) != 0) {
     die("pthread_create");
   }
+}
+
+void stop_server(server_t *server) {
+  // Join server thread
+  server->stop = 1;
+  pthread_join(server->listener_thread, NULL);
+
+  // Stop workers
+  for(int i = 0; i < server->worker_count; i++) {
+    worker_t *worker = server->workers[i];
+    worker->stop = 1;
+    pthread_join(worker->handler_thread, NULL);
+    
+    // Free worker resources
+    close(worker->epoll_fd);
+    free(worker->events);
+    free(worker);
+  }
+
+  // Free peers
+  for(int i = 0; i < server->peer_count; i++) {
+    free(server->peers[i]);
+  }
+
+  // Free server resources
+  close(server->epoll_fd);
+  close(server->socket_fd);
+  free(server->events);
+  free(server->peers);
+  free(server);
 }
