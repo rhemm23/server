@@ -2,6 +2,7 @@
 #include <sys/epoll.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
+#include <string.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -20,9 +21,11 @@ static void *worker_loop(void *state) {
   while(!worker->stop) {
     int nready = epoll_wait(worker->epoll_fd, worker->events, WORKER_FDS, -1);
     for(int i = 0; i < nready; i++) {
-      if(worker->events[i].events & EPOLLERR) {
+      struct epoll_event cevent = worker->events[i];
+      peer_t *peer = worker->parent->peers[cevent.data.fd];
+      if(cevent.events & EPOLLERR) {
         die("epoll_wait");
-      } else if(worker->events[i].events & EPOLLIN) {
+      } else if((cevent.events & EPOLLIN) && (peer->state == RECEIVING)) {
         uint8_t *buffer = (uint8_t*)smalloc(PACKET_SIZE);
         int nbytes = recv(worker->events[i].data.fd, buffer, PACKET_SIZE, 0);
         if(nbytes == 0) {
@@ -32,10 +35,41 @@ static void *worker_loop(void *state) {
             die("recv");
           }
         } else {
-           
+          int copy_bytes;
+          if(peer->recv_size == 0) {
+            // First two bytes are size
+            peer->recv_size = (size_t)(buffer[0] << 8 | buffer[1]);
+            peer->recv_buf = (uint8_t*)smalloc(peer->recv_size);
+
+            // Copy from buffer
+            copy_bytes = nbytes - 2 > peer->recv_size ? peer->recv_size : nbytes - 2;
+            memcpy(peer->recv_buf, &buffer[2], copy_bytes);
+          } else {
+            // Copy new bytes
+            int rem_bytes = peer->recv_size - peer->recv_cnt;
+            copy_bytes = nbytes > rem_bytes ? rem_bytes : nbytes;
+            memcpy(&peer->recv_buf[peer->recv_cnt], buffer, copy_bytes);
+          }
+          // Update peer state
+          peer->recv_cnt += copy_bytes;
+          if(peer->recv_cnt == peer->recv_size) {
+            peer->state = PROCESSING;
+            // TODO, modify peer epoll
+          }
         }
-      } else if(worker->events[i].events & EPOLLOUT) {
-        
+        free(buffer);
+      } else if((cevent.events & EPOLLOUT) && (peer->state == RESPONDING)) {
+        int sendlen = peer->send_size - peer->send_cnt;
+        int nsent = send(cevent.data.fd, &peer->send_buf[peer->send_cnt], sendlen, 0);
+        if(nsent == -1 && errno != EAGAIN && errno != EWOULDBLOCK) {
+          die("send");
+        }
+        if(nsent < sendlen) {
+          peer->send_cnt += nsent;
+        } else {
+          // All data sent to client
+          // TODO, disconnect
+        }
       }
     }
   }
@@ -44,10 +78,11 @@ static void *worker_loop(void *state) {
 /**
  * Creates a new worker to handle clients
  */
-static worker_t *start_worker() {
+static worker_t *start_worker(server_t *server) {
   worker_t *worker = (worker_t*)scalloc(1, sizeof(worker_t));
   worker->events = (struct epoll_event*)scalloc(WORKER_FDS, sizeof(struct epoll_event));
-  
+  worker->parent = server;
+
   if((worker->epoll_fd = epoll_create1(0)) < 0) {
     die("epoll_create1");
   }
@@ -168,7 +203,7 @@ server_t *start_server(config_t *config) {
   server->worker_count = config->workers;
   server->workers = (worker_t**)scalloc(server->worker_count, sizeof(worker_t*));
   for(int i = 0; i < server->worker_count; i++) {
-    server->workers[i] = start_worker();
+    server->workers[i] = start_worker(server);
   }
 
   // Start listener thread

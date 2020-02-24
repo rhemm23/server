@@ -14,6 +14,7 @@ typedef struct config {
 typedef struct worker {
 	struct epoll_event *events;
 	pthread_t handler_thread;
+  struct server *parent;
 	volatile int stop;
 	int epoll_fd;
 } worker_t;
@@ -30,6 +31,8 @@ typedef struct peer {
   uint8_t *send_buf;
   size_t recv_size;
   size_t send_size;
+  size_t recv_cnt;
+  size_t send_cnt;
 } peer_t;
 
 typedef struct server {
