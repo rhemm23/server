@@ -2,6 +2,7 @@
 #define SERVER_H
 
 #include <inttypes.h>
+#include <pthread.h>
 
 typedef struct config {
 	uint16_t port;

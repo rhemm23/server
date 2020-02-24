@@ -2,7 +2,6 @@
 #include <sys/epoll.h>
 #include <sys/types.h>
 #include <arpa/inet.h>
-#include <pthread.h>
 #include <fcntl.h>
 #include <errno.h>
 
