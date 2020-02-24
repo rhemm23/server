@@ -6,6 +6,7 @@
 
 typedef struct config {
 	uint16_t port;
+  int max_conns;
 	int backlog;
 	int workers;
 } config_t;
@@ -17,13 +18,29 @@ typedef struct worker {
 	int epoll_fd;
 } worker_t;
 
+typedef enum {
+  RECEIVING,
+  PROCESSING,
+  RESPONDING
+} peer_state_t;
+
+typedef struct peer {
+  peer_state_t state;
+  uint8_t *recv_buf;
+  uint8_t *send_buf;
+  size_t recv_size;
+  size_t send_size;
+} peer_t;
+
 typedef struct server {
 	struct epoll_event *events;
 	pthread_t listener_thread;
-	volatile int stop;
 	worker_t **workers;
+  peer_t **peers;
+  volatile int stop;
 	int worker_count;
 	int worker_cycle;
+  int peer_count;
 	int socket_fd;
 	int epoll_fd;
 } server_t;

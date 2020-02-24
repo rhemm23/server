@@ -10,6 +10,7 @@
 #include "server.h"
 
 #define WORKER_FDS 1024
+#define PACKET_SIZE 8192
 
 /**
  * Worker loop to handle client states
@@ -21,8 +22,20 @@ static void *worker_loop(void *state) {
     for(int i = 0; i < nready; i++) {
       if(worker->events[i].events & EPOLLERR) {
         die("epoll_wait");
-      } else {
-        // TODO, handle client input/output
+      } else if(worker->events[i].events & EPOLLIN) {
+        uint8_t *buffer = (uint8_t*)smalloc(PACKET_SIZE);
+        int nbytes = recv(worker->events[i].data.fd, buffer, PACKET_SIZE, 0);
+        if(nbytes == 0) {
+          // TODO disconnect
+        } else if (nbytes < 0) {
+          if(errno != EAGAIN && errno != EWOULDBLOCK) {
+            die("recv");
+          }
+        } else {
+           
+        }
+      } else if(worker->events[i].events & EPOLLOUT) {
+        
       }
     }
   }
@@ -106,7 +119,12 @@ static void *server_loop(void *state) {
           // Setup client event
           struct epoll_event event;
           event.data.fd = peer_fd;
-          event.events |= EPOLLIN | EPOLLOUT;
+          event.events |= EPOLLIN;
+
+          // Setup peer state
+          peer_t *peer = (peer_t*)scalloc(1, sizeof(peer_t));
+          peer->state = RECEIVING;
+          server->peers[peer_fd] = peer;
 
           // Add peer to worker epoll
           int worker_fd = server->workers[server->worker_cycle]->epoll_fd;
@@ -140,6 +158,10 @@ server_t *start_server(config_t *config) {
   if(epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, server->socket_fd, &accept) < 0) {
     die("epoll_ctl");
   }
+
+  // Setup peer states
+  server->peer_count = config->max_conns;
+  server->peers = (peer_t**)scalloc(server->peer_count, sizeof(peer_t*));
 
   // Setup workers
   server->worker_cycle = 0;
