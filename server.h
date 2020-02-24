@@ -5,23 +5,22 @@
 #include <pthread.h>
 
 typedef struct config {
-	uint16_t port;
+  uint16_t port;
   int max_conns;
-	int backlog;
-	int workers;
+  int backlog;
+  int workers;
 } config_t;
 
 typedef struct worker {
-	struct epoll_event *events;
-	pthread_t handler_thread;
+  struct epoll_event *events;
+  pthread_t handler_thread;
   struct server *parent;
-	volatile int stop;
-	int epoll_fd;
+  volatile int stop;
+  int epoll_fd;
 } worker_t;
 
 typedef enum {
   RECEIVING,
-  PROCESSING,
   RESPONDING
 } peer_state_t;
 
@@ -36,16 +35,16 @@ typedef struct peer {
 } peer_t;
 
 typedef struct server {
-	struct epoll_event *events;
-	pthread_t listener_thread;
-	worker_t **workers;
+  struct epoll_event *events;
+  pthread_t listener_thread;
+  worker_t **workers;
   peer_t **peers;
   volatile int stop;
-	int worker_count;
-	int worker_cycle;
+  int worker_count;
+  int worker_cycle;
   int peer_count;
-	int socket_fd;
-	int epoll_fd;
+  int socket_fd;
+  int epoll_fd;
 } server_t;
 
 

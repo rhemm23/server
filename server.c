@@ -14,6 +14,25 @@
 #define PACKET_SIZE 8192
 
 /**
+ * Sets the send buffer using the received buffer
+ */
+static void process_peer(peer_t *peer) {
+  static char *msg = "hi!";
+  peer->send_buf = (uint8_t*)msg;
+  peer->send_size = 4;
+}
+
+/**
+ * Disconnect a peer
+ */
+static void disconnect_peer(worker_t *worker, int peer_fd) {
+  worker->parent->peers[peer_fd] = NULL;
+  if(epoll_ctl(worker->epoll_fd, EPOLL_CTL_DEL, peer_fd, NULL) < 0) {
+    die("epoll_ctl");
+  }
+}
+
+/**
  * Worker loop to handle client states
  */
 static void *worker_loop(void *state) {
@@ -29,7 +48,7 @@ static void *worker_loop(void *state) {
         uint8_t *buffer = (uint8_t*)smalloc(PACKET_SIZE);
         int nbytes = recv(worker->events[i].data.fd, buffer, PACKET_SIZE, 0);
         if(nbytes == 0) {
-          // TODO disconnect
+          disconnect_peer(worker, cevent.data.fd);
         } else if (nbytes < 0) {
           if(errno != EAGAIN && errno != EWOULDBLOCK) {
             die("recv");
@@ -53,8 +72,18 @@ static void *worker_loop(void *state) {
           // Update peer state
           peer->recv_cnt += copy_bytes;
           if(peer->recv_cnt == peer->recv_size) {
-            peer->state = PROCESSING;
-            // TODO, modify peer epoll
+            process_peer(peer);
+            peer->state = RESPONDING;
+            
+            // Set event to write
+            struct epoll_event newevent;
+            newevent.data.fd = cevent.data.fd;
+            newevent.events |= EPOLLOUT;
+
+            // Modify peer fd epoll
+            if(epoll_ctl(worker->epoll_fd, EPOLL_CTL_MOD, cevent.data.fd, &newevent) < 0) {
+              die("epoll_ctl");
+            }
           }
         }
         free(buffer);
@@ -67,8 +96,7 @@ static void *worker_loop(void *state) {
         if(nsent < sendlen) {
           peer->send_cnt += nsent;
         } else {
-          // All data sent to client
-          // TODO, disconnect
+          disconnect_peer(worker, cevent.data.fd);
         }
       }
     }
