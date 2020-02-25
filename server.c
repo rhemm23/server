@@ -1,3 +1,4 @@
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <sys/types.h>
@@ -43,6 +44,9 @@ static void *worker_loop(void *state) {
     int nready = epoll_wait(worker->epoll_fd, worker->events, WORKER_FDS, -1);
     for(int i = 0; i < nready; i++) {
       struct epoll_event cevent = worker->events[i];
+      if(cevent.data.fd == worker->wake_fd) {
+        continue;
+      }
       peer_t *peer = worker->parent->peers[cevent.data.fd];
       if(cevent.events & EPOLLERR) {
         die("epoll_wait");
@@ -113,8 +117,21 @@ static worker_t *start_worker(server_t *server) {
   worker->events = (struct epoll_event*)scalloc(WORKER_FDS, sizeof(struct epoll_event));
   worker->parent = server;
 
+  worker->events = (struct epoll_event*)scalloc(WORKER_FDS, sizeof(struct epoll_event));
+  worker->parent = server;
+
+  if((worker->wake_fd = eventfd(0, 0)) < 0) {
+    die("eventfd");
+  }
+
+  struct epoll_event wake;
+  wake.data.fd = worker->wake_fd;
+  wake.events = EPOLLIN | EPOLLOUT;
   if((worker->epoll_fd = epoll_create1(0)) < 0) {
     die("epoll_create1");
+  }
+  if(epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, worker->wake_fd, &wake) < 0) {
+    die("epoll_ctl");
   }
   if(pthread_create(&worker->handler_thread, NULL, worker_loop, (void*)worker) != 0) {
     die("pthread_create");
@@ -170,6 +187,9 @@ static void *server_loop(void *state) {
   while(!server->stop) {
     int nready = epoll_wait(server->epoll_fd, server->events, 1, -1);
     for(int i = 0; i < nready; i++) {
+      if(server->events[i].data.fd == server->wake_fd) {
+        continue;
+      }
       if(server->events[i].events & EPOLLERR) {
         die("epoll_wait");
       } else {
@@ -221,6 +241,18 @@ server_t *start_server(config_t *config) {
     die("epoll_ctl");
   }
 
+  if((server->wake_fd = eventfd(0, 0)) < 0) {
+    die("eventfd");
+  }
+
+  // Setup wake event
+  struct epoll_event wake;
+  wake.data.fd = server->wake_fd;
+  wake.events = EPOLLIN | EPOLLOUT;
+  if(epoll_ctl(server->epoll_fd, EPOLL_CTL_ADD, server->wake_fd, &wake) < 0) {
+    die("epoll_ctl");
+  }
+
   // Setup peer states
   server->peer_count = config->max_conns;
   server->peers = (peer_t**)scalloc(server->peer_count, sizeof(peer_t*));
@@ -232,27 +264,30 @@ server_t *start_server(config_t *config) {
   for(int i = 0; i < server->worker_count; i++) {
     server->workers[i] = start_worker(server);
   }
-
-  // Start listener thread
-  if(pthread_create(&server->listener_thread, NULL, server_loop, (void*)server) != 0) {
+  if(pthread_create(&server->listener_thread, NULL, server_loop, (void*)server)) {
     die("pthread_create");
   }
   return server;
 }
 
 void stop_server(server_t *server) {
+  uint8_t buf[1];
+
   // Join server thread
   server->stop = 1;
+  write(server->wake_fd, buf, 1);
   pthread_join(server->listener_thread, NULL);
 
   // Stop workers
   for(int i = 0; i < server->worker_count; i++) {
     worker_t *worker = server->workers[i];
     worker->stop = 1;
+    write(worker->wake_fd, buf, 1);
     pthread_join(worker->handler_thread, NULL);
     
     // Free worker resources
     close(worker->epoll_fd);
+    close(worker->wake_fd);
     free(worker->events);
     free(worker);
   }
@@ -263,6 +298,7 @@ void stop_server(server_t *server) {
   }
 
   // Free server resources
+  close(server->wake_fd);
   close(server->epoll_fd);
   close(server->socket_fd);
   free(server->events);

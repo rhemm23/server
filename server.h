@@ -17,6 +17,7 @@ typedef struct worker {
   struct server *parent;
   volatile int stop;
   int epoll_fd;
+  int wake_fd;
 } worker_t;
 
 typedef enum {
@@ -45,6 +46,7 @@ typedef struct server {
   int peer_count;
   int socket_fd;
   int epoll_fd;
+  int wake_fd;
 } server_t;
 
 

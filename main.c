@@ -17,11 +17,11 @@ int main() {
   signal(SIGINT, handle_interrupt);
 
   config_t config;
-  config.port = 7070;
+  config.port = 7270;
   config.backlog = 10;
   config.workers = 4;
 
-  printf("Starting server on port 7070...\n");
+  printf("Starting server on port 7270...\n");
   server = start_server(&config);
   printf("Server started...\n");
   if(server == NULL) {
