@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <stdio.h>
 
 #include "util.h"
 
@@ -114,9 +115,6 @@ static void *worker_loop(void *state) {
  */
 static worker_t *start_worker(server_t *server) {
   worker_t *worker = (worker_t*)scalloc(1, sizeof(worker_t));
-  worker->events = (struct epoll_event*)scalloc(WORKER_FDS, sizeof(struct epoll_event));
-  worker->parent = server;
-
   worker->events = (struct epoll_event*)scalloc(WORKER_FDS, sizeof(struct epoll_event));
   worker->parent = server;
 
